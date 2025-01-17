@@ -113,6 +113,13 @@ pub mod commands {
             slug: Option<Slug>,
         ) -> Result<ShortLink, ShortenerError>;
 
+        // Update shortlink
+        fn handle_change_short_link(
+            &mut self,
+            slug: Slug,
+            new_url: Url,
+        ) -> Result<ShortLink, ShortenerError>;
+
         /// Processes a redirection by [`Slug`], returning the associated
         /// [`ShortLink`] or a [`ShortenerError`].
         fn handle_redirect(&mut self, slug: Slug) -> Result<ShortLink, ShortenerError>;
@@ -137,6 +144,7 @@ pub mod queries {
 #[derive(Debug)]
 pub enum Event {
     LinkCreated(ShortLink),
+    LinkUpdated(ShortLink),
     LinkRedirected(Slug),
 }
 
@@ -210,6 +218,28 @@ impl commands::CommandHandler for UrlShortenerService {
         Ok(short_link)
     }
 
+    fn handle_change_short_link(
+        &mut self,
+        slug: Slug,
+        new_url: Url,
+    ) -> Result<ShortLink, ShortenerError> {
+        if let Some(short_link) = self.links.get_mut(&slug) {
+            short_link.url = new_url.clone();
+
+            if let Some(stats) = self.stats.get_mut(&slug) {
+                stats.link = short_link.clone();
+            }
+
+            self.event_store
+                // Add new variant to Event enum. Seems use Created is not correct for update action
+                .push(Event::LinkUpdated(short_link.clone()));
+
+            Ok(short_link.clone())
+        } else {
+            return Err(ShortenerError::SlugNotFound);
+        }
+    }
+
     fn handle_redirect(&mut self, slug: Slug) -> Result<ShortLink, ShortenerError> {
         if let Some(short_link) = self.links.get(&slug) {
             if let Some(stat) = self.stats.get_mut(&slug) {
@@ -244,6 +274,16 @@ fn main() {
     let redirected_link = service.handle_redirect(slug.slug.clone()).unwrap();
     let redirected_link = service.handle_redirect(slug.slug.clone()).unwrap();
     println!("Redirected to: {:?}", redirected_link);
+
+    // Getting stats
+    let stats = service.get_stats(slug.slug.clone()).unwrap();
+    println!("Stats: {:?}", stats);
+
+    // Change the short link
+    let new_url = Url("https://www.example.com".to_string());
+    service
+        .handle_change_short_link(slug.slug.clone(), new_url)
+        .unwrap();
 
     // Getting stats
     let stats = service.get_stats(slug.slug.clone()).unwrap();
